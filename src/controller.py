@@ -4,6 +4,7 @@ import rospy
 from std_msgs.msg import Float64
 from gazebo_msgs.msg import LinkStates
 from tf.transformations import euler_from_quaternion
+import matplotlib.pyplot as plt
 
 left = rospy.Publisher('omnirosbot/left_joint_velocity_controller/command', Float64, queue_size=10)
 right = rospy.Publisher('omnirosbot/right_joint_velocity_controller/command', Float64, queue_size=10)
@@ -14,8 +15,10 @@ VMAX = 1.0
 OMEGAMAX = 3.0
 R = 0.04
 r = 0.01905
-P = 1.0
-I = 0.0001
+P = 5.0
+I = 0.0005
+STOP_DIST = 0.01
+STOP_ANG = 0.1
 
  # world's coordinates
 xw = 0.0
@@ -29,13 +32,20 @@ targetTheta = 0.0
 vxw = 0.0 
 vyw = 0.0
 omega = 0.0
-#errors
+# errors
 eix = 0.0
 eiy = 0.0
 eit = 0.0
-
 # is robot moving
-move = False 
+move = False
+
+# norms for error
+errorL1 = []
+errorL2 = []
+errorInf = []
+
+# is showing plots
+showPlot = False
 
 def normRad(rad):
     rad = math.fmod(rad, math.pi*2)
@@ -61,7 +71,7 @@ def moveToWorldPoint(x,y,theta):
     move = True
 
 def onUpdate():
-    global xw, yw, theta, targetX, targetY, targetTheta, eix, eiy, eit 
+    global xw, yw, theta, targetX, targetY, targetTheta, eix, eiy, eit, showPlot, STOP_DIST, STOP_ANG, move
     if move:
         # PI regulator
         ex = targetX - xw
@@ -69,7 +79,7 @@ def onUpdate():
         et = math.pi - normRad(theta + math.pi - targetTheta)
         eix += ex
         eiy += ey
-        eit += et
+        eit += et  
         
         vxw = ex * P + eix * I
         vyw = ey * P + eiy * I
@@ -97,6 +107,26 @@ def onUpdate():
         left.publish((omegaLVxm2 - sqrtVym2)/r)
         right.publish((omegaLVxm2 + sqrtVym2)/r)
         back.publish((omegaL + vxw)/r) 
+
+        if max(ex, ey) < STOP_DIST and et < STOP_ANG:
+            left.publish(0.0)
+            right.publish(0.0)
+            back.publish(0.0)
+            move = False
+
+        # add errors to plot
+        errorL1.append(abs(ex) + abs(ey))
+        errorL2.append(ex*ex + ey*ey)
+        errorInf.append(max(abs(ex), abs(ey)))
+
+    if not showPlot and not move:
+        time = np.linspace(1, len(errorL2), len(errorL2))
+        plt.plot(time, errorL2)
+        plt.xlabel('time')
+        plt.ylabel('L2 norm error')
+        plt.title(f'P: {P}, I: {I}')
+        plt.show()
+        showPlot = True 
         
 
 def start():
