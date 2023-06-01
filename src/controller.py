@@ -14,8 +14,8 @@ VMAX = 1.0
 OMEGAMAX = 3.0
 R = 0.04
 r = 0.01905
-P = 5
-I = 0.005
+P = 1.0
+I = 0.0001
 
  # world's coordinates
 xw = 0.0
@@ -38,8 +38,10 @@ eit = 0.0
 move = False 
 
 def normRad(rad):
-    return math.atan2(math.sin(rad), math.cos(rad))
-    
+    rad = math.fmod(rad, math.pi*2)
+    if rad < 0:
+        rad += math.pi * 2
+    return rad
 
 def link_state(state):
     global xw, yw, theta
@@ -49,6 +51,7 @@ def link_state(state):
     yw = basePos.y
     (_,_,theta) = euler_from_quaternion([baseOrient.x, baseOrient.y,
                                          baseOrient.z, baseOrient.w])
+    onUpdate()
 
 def moveToWorldPoint(x,y,theta):
     global targetX, targetY, targetTheta, move
@@ -60,6 +63,7 @@ def moveToWorldPoint(x,y,theta):
 def onUpdate():
     global xw, yw, theta, targetX, targetY, targetTheta, eix, eiy, eit 
     if move:
+        # PI regulator
         ex = targetX - xw
         ey = targetY - yw
         et = math.pi - normRad(theta + math.pi - targetTheta)
@@ -91,18 +95,16 @@ def onUpdate():
         omegaLVxm2 = omegaL - vxm2
 
         left.publish((omegaLVxm2 - sqrtVym2)/r)
-        right.publish((omegaL + vxw)/r)
-        back.publish((omegaLVxm2 + sqrtVym2)/r)
-        
+        right.publish((omegaLVxm2 + sqrtVym2)/r)
+        back.publish((omegaL + vxw)/r) 
         
 
 def start():
     rospy.init_node('omnirosbot_controller')
     rate = rospy.Rate(20)
     rospy.Subscriber('/gazebo/link_states', LinkStates, link_state)
-    moveToWorldPoint(0.5, 0.8, 0)
+    moveToWorldPoint(0.5, 0.8, 1.57)
     while not rospy.is_shutdown():
-        onUpdate()
         rate.sleep()
 
 if __name__ == '__main__':
