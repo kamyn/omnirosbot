@@ -5,6 +5,8 @@ from std_msgs.msg import Float64
 from gazebo_msgs.msg import LinkStates
 from tf.transformations import euler_from_quaternion
 import matplotlib.pyplot as plt
+from scipy.interpolate import splev, splrep
+from time import sleep
 
 left = rospy.Publisher('omnirosbot/left_joint_velocity_controller/command', Float64, queue_size=10)
 right = rospy.Publisher('omnirosbot/right_joint_velocity_controller/command', Float64, queue_size=10)
@@ -12,11 +14,11 @@ back = rospy.Publisher('omnirosbot/back_joint_velocity_controller/command', Floa
 
 #CONSTANTS
 VMAX = 1.0
-OMEGAMAX = 3.0
+OMEGAMAX = 10.0
 R = 0.04
 r = 0.01905
 P = 5.0
-I = 0.0005
+I = 0.001
 STOP_DIST = 0.01
 STOP_ANG = 0.1
 
@@ -63,12 +65,53 @@ def link_state(state):
                                          baseOrient.z, baseOrient.w])
     onUpdate()
 
+def generateTrajectory(points):
+    x = [p[0] for p in points]
+    y = [p[1] for p in points]
+    theta = [p[2] for p in points]
+    t = np.linspace(0, 1, len(points))
+    sx = splrep(t, x, k=3)
+    sy = splrep(t, y, k=3)
+    stheta = splrep(t, theta, k=1)
+
+    tn = np.linspace(0, 1, 50) 
+    xn = splev(tn, sx)
+    yn = splev(tn, sy)
+    thetan = splev(tn, stheta)
+
+    trajectory = [(x, y, th) for x, y, th in zip(xn, yn, thetan)]
+    return trajectory
+
+
 def moveToWorldPoint(x,y,theta):
     global targetX, targetY, targetTheta, move
     targetX = x
     targetY = y
     targetTheta = theta
     move = True
+
+def moveBSpline(points): # points - list of points and angles
+    global move, errorL2, xw, yw, theta
+    trajectory = generateTrajectory(points)
+    for (x,y,th) in trajectory:
+        while True:
+            if not move:
+                print(f'move to: {x}, {y}, {th}')
+                moveToWorldPoint(x,y,th)
+                break 
+            errorL2.append((xw - x) * (xw - x) + (yw - y) * (yw - y) + (theta - th) * (theta - th))
+            sleep(1/100)
+
+    time = np.linspace(1, len(errorL2), len(errorL2))
+    #plt.plot(time, errorL1)
+    plt.plot(time, errorL2) 
+    #plt.plot(time, errorInf)
+    #plt.legend(['L1', 'L2', 'Linf'])
+    plt.xlabel('time')
+    plt.ylabel('error')
+    plt.title(f'P: {P}, I: {I}')
+    plt.show()
+
 
 def onUpdate():
     global xw, yw, theta, targetX, targetY, targetTheta, eix, eiy, eit, showPlot, STOP_DIST, STOP_ANG, move
@@ -94,6 +137,7 @@ def onUpdate():
         if omega > OMEGAMAX:
             omega = OMEGAMAX
 
+        # inverse kinematics
         vxm = math.cos(theta) * vxw + math.sin(theta) * vyw
         vym = math.cos(theta) * vyw - math.sin(theta) * vxw
         vxw = vxm
@@ -113,27 +157,32 @@ def onUpdate():
             right.publish(0.0)
             back.publish(0.0)
             move = False
+            eix = eiy = eit = 0.0
 
         # add errors to plot
-        errorL1.append(abs(ex) + abs(ey))
-        errorL2.append(ex*ex + ey*ey)
-        errorInf.append(max(abs(ex), abs(ey)))
-
+        #errorL1.append(abs(ex) + abs(ey))
+        #errorL2.append(ex*ex + ey*ey)
+        #errorInf.append(max(abs(ex), abs(ey)))
+'''
     if not showPlot and not move:
         time = np.linspace(1, len(errorL2), len(errorL2))
-        plt.plot(time, errorL2)
+        plt.plot(time, errorL1)
+        plt.plot(time, errorL2) 
+        plt.plot(time, errorInf)
+        plt.legend(['L1', 'L2', 'Linf'])
         plt.xlabel('time')
-        plt.ylabel('L2 norm error')
+        plt.ylabel('error')
         plt.title(f'P: {P}, I: {I}')
         plt.show()
         showPlot = True 
-        
+'''    
 
 def start():
     rospy.init_node('omnirosbot_controller')
     rate = rospy.Rate(20)
     rospy.Subscriber('/gazebo/link_states', LinkStates, link_state)
-    moveToWorldPoint(0.5, 0.8, 1.57)
+    #moveToWorldPoint(0.5, 0.8, 1.57)
+    moveBSpline([(0.2, 0.3, 1.57), (0.5, 0.2, 0.0), (0.7, 0.8, 1.57), (1.0, 1.0, 0.0)])
     while not rospy.is_shutdown():
         rate.sleep()
 
