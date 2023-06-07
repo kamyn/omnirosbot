@@ -18,9 +18,10 @@ OMEGAMAX = 10.0
 R = 0.04
 r = 0.01905
 P = 5.0
-I = 0.001
+I = 0.0005
 STOP_DIST = 0.01
 STOP_ANG = 0.1
+BSPLINE_POINTS = 100
 
  # world's coordinates
 xw = 0.0
@@ -46,6 +47,10 @@ errorL1 = []
 errorL2 = []
 errorInf = []
 
+# trajectory
+(tx, ty) = ([],[])
+(ptx, pty) = ([],[])
+
 # is showing plots
 showPlot = False
 
@@ -66,6 +71,7 @@ def link_state(state):
     onUpdate()
 
 def generateTrajectory(points):
+    global BSPLINE_POINTS
     x = [p[0] for p in points]
     y = [p[1] for p in points]
     theta = [p[2] for p in points]
@@ -74,7 +80,7 @@ def generateTrajectory(points):
     sy = splrep(t, y, k=3)
     stheta = splrep(t, theta, k=1)
 
-    tn = np.linspace(0, 1, 50) 
+    tn = np.linspace(0, 1, BSPLINE_POINTS) 
     xn = splev(tn, sx)
     yn = splev(tn, sy)
     thetan = splev(tn, stheta)
@@ -91,7 +97,7 @@ def moveToWorldPoint(x,y,theta):
     move = True
 
 def moveBSpline(points): # points - list of points and angles
-    global move, errorL2, xw, yw, theta
+    global move, errorL2, xw, yw, theta, tx, ty, ptx, pty, BSPLINE_POINTS
     trajectory = generateTrajectory(points)
     for (x,y,th) in trajectory:
         while True:
@@ -99,17 +105,27 @@ def moveBSpline(points): # points - list of points and angles
                 print(f'move to: {x}, {y}, {th}')
                 moveToWorldPoint(x,y,th)
                 break 
-            errorL2.append((xw - x) * (xw - x) + (yw - y) * (yw - y) + (theta - th) * (theta - th))
-            sleep(1/100)
+            (ex, ey, et) = (xw - x, yw - y, theta - th)
+            (exa, eya, eta) = (abs(ex), abs(ey), abs(et))
+            errorL1.append(exa + eya) # + eta)
+            errorL2.append(ex*ex + ey*ey) # + et*et)
+            errorInf.append(max(exa, eya)) # , eta)) 
+
+            tx.append(xw)
+            ty.append(yw)
+            ptx.append(x)
+            pty.append(y)
+
+            sleep(1/60)
 
     time = np.linspace(1, len(errorL2), len(errorL2))
-    #plt.plot(time, errorL1)
+    plt.plot(time, errorL1)
     plt.plot(time, errorL2) 
-    #plt.plot(time, errorInf)
-    #plt.legend(['L1', 'L2', 'Linf'])
-    plt.xlabel('time')
+    plt.plot(time, errorInf)
+    plt.legend(['L1', 'L2', 'Linf'])
+    plt.xlabel('iteration')
     plt.ylabel('error')
-    plt.title(f'P: {P}, I: {I}')
+    plt.title(f'B-Spline trajectory with {BSPLINE_POINTS} points')  
     plt.show()
 
 
@@ -159,30 +175,32 @@ def onUpdate():
             move = False
             eix = eiy = eit = 0.0
 
-        # add errors to plot
-        #errorL1.append(abs(ex) + abs(ey))
-        #errorL2.append(ex*ex + ey*ey)
-        #errorInf.append(max(abs(ex), abs(ey)))
 '''
+        # add errors to plot
+        errorL1.append(abs(ex) + abs(ey))
+        errorL2.append(ex*ex + ey*ey)
+        errorInf.append(max(abs(ex), abs(ey)))
+
     if not showPlot and not move:
         time = np.linspace(1, len(errorL2), len(errorL2))
         plt.plot(time, errorL1)
         plt.plot(time, errorL2) 
         plt.plot(time, errorInf)
         plt.legend(['L1', 'L2', 'Linf'])
-        plt.xlabel('time')
+        plt.xlabel('iteration')
         plt.ylabel('error')
         plt.title(f'P: {P}, I: {I}')
         plt.show()
         showPlot = True 
-'''    
+'''
 
 def start():
     rospy.init_node('omnirosbot_controller')
     rate = rospy.Rate(20)
     rospy.Subscriber('/gazebo/link_states', LinkStates, link_state)
     #moveToWorldPoint(0.5, 0.8, 1.57)
-    moveBSpline([(0.2, 0.3, 1.57), (0.5, 0.2, 0.0), (0.7, 0.8, 1.57), (1.0, 1.0, 0.0)])
+    #moveBSpline([(0., 0., 0.), (1., 3., 3.14), (3., 1., 0.), (5., 4., 3.14)])
+    moveBSpline([(0.,0.,0.),(0.2, 0.3, 1.57), (0.5, 0.2, 0.), (0.7, 0.8, 1.57), (1.0, 1.0, 0.)])
     while not rospy.is_shutdown():
         rate.sleep()
 
